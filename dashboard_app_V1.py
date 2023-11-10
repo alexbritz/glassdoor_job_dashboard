@@ -11,17 +11,10 @@ def load_and_clean_data():
     data = pd.read_csv('glassdoor_jobs.csv')
     
     # Clean: Extract Min and Max Salary Estimate
-
-    def extract_salary_min_max(salary_text):
+    def extract_salary(salary_text):
         salary_match = re.findall(r'\$(\d+)[Kk]', salary_text)
-        if len(salary_match) == 1:
-            return [int(salary_match[0]), int(salary_match[0])]
-        elif len(salary_match) == 2:
-            return [int(salary_match[0]), int(salary_match[1])]
-        else:
-            return [-1, -1]
-    
-    data[['Min Salary Estimate', 'Max Salary Estimate']] = data['Salary Estimate'].apply(lambda x: pd.Series(extract_salary_min_max(x)))
+        return [int(salary_match[0]), int(salary_match[1])] if salary_match and len(salary_match) == 2 else [-1, -1]
+    data[['Min Salary Estimate', 'Max Salary Estimate']] = data['Salary Estimate'].apply(lambda x: pd.Series(extract_salary(x)))
     
     # Clean: Extract Company Name and Rating
     def extract_company_info(company_text):
@@ -29,35 +22,14 @@ def load_and_clean_data():
         return [split_text[0], float(split_text[1])] if len(split_text) == 2 else [company_text, -1]
     data[['Company Name Clean', 'Company Rating']] = data['Company Name'].apply(lambda x: pd.Series(extract_company_info(x)))
     
-
-
     # Clean: Extract Job Title
     def extract_job_title(job_title_text):
         return job_title_text.split('(')[0].strip()
     data['Job Title'] = data['Job Title'].apply(lambda x: extract_job_title(x))
 
     # Clean: Summarize Similar Job Titles
-
-    #
-    category_mapping = {
-            "Data Scientist": "Data Scientist",
-            "Data Science": "Data Scientist",
-            "Senior": "Senior Data Scientist",
-            "Sr": "Senior Data Scientist",
-            "Junior": "Junior Data Scientist",
-            "Jr": "Junior Data Scientist",
-            "Entry Level": "Junior Data Scientist",
-            "Principal": "Principal/Lead Data Scientist",
-            "Lead": "Principal/Lead Data Scientist",
-            "Data Engineer": "Data Engineer",
-            "Machine Learning": "Machine Learning Specialist",
-            "Manager": "Manager/Director",
-            "Director": "Manager/Director",
-            "Analyst": "Analyst",
-            "Database Administrator": "Database Administrator"
-        }
-    
-    category_mapping = {
+    def categorize_title(title):
+        category_mapping = {
             "Data Scientist": "Data Scientist",
             "Senior": "Senior Data Scientist",
             "Sr": "Senior Data Scientist",
@@ -72,10 +44,37 @@ def load_and_clean_data():
             "Director": "Manager/Director",
             "Analyst": "Analyst"
         }
-    data['Job Category'] = 'Other'
 
-    for key in category_mapping.keys():
-        data.loc[data['Job Title'].str.contains(key, flags=re.IGNORECASE), 'Job Category'] = category_mapping[key]
+        if "Machine Learning" in title:
+            return "Machine Learning Specialist"
+        
+        for key, value in category_mapping.items():
+            if key in title:
+                return value
+        return "Other"
+
+    def recategorize_title(row):
+        if row['Job Category'] == 'Data Scientist':
+            if any(keyword in row['Cleaned Job Title'] for keyword in ["Junior", "Entry Level"]):
+                return "Junior Data Scientist"
+            elif any(keyword in row['Cleaned Job Title'] for keyword in ["Senior", "Sr"]):
+                return "Senior Data Scientist"
+            elif any(keyword in row['Cleaned Job Title'] for keyword in ["Principal", "Lead"]):
+                return "Principal/Lead Data Scientist"
+            elif any(keyword in row['Cleaned Job Title'] for keyword in ["Manager", "Director"]):
+                return "Manager/Director"
+        return row['Job Category']
+
+    # Function that cleans the job title
+    def clean_title(df):
+        df['Cleaned Job Title'] = df['Job Title'].str.title()
+        # Initial categorization
+        df['Job Category'] = df['Job Title'].apply(categorize_title)
+        # Recategorization based on specific keywords
+        df['Job Category'] = df.apply(recategorize_title, axis=1)
+        return df
+
+    data = clean_title(data)
 
     data['Mean Salary Estimate'] = data[['Min Salary Estimate', 'Max Salary Estimate']].mean(axis=1)
     data['Mean Salary Estimate MUSD'] = data['Mean Salary Estimate']/1000
@@ -86,8 +85,7 @@ def load_and_clean_data():
 data = load_and_clean_data()
 
 # Streamlit App
-# st.title("Salary Estimates vs. Company Rating by Job Title")
-st.markdown('<h1 style="font-size: 24px;">Glassdoor Data Science Jobs</h1>', unsafe_allow_html=True)
+st.title("Salary Estimates vs. Company Rating by Job Title")
 
 # Generate and sort job title counts
 title_counts = data["Job Category"].value_counts().reset_index()
